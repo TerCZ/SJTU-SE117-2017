@@ -1,0 +1,199 @@
+#!/usr/local/bin/python3
+
+import sqlite3
+from os import listdir
+from sys import argv
+from time import time
+
+
+def timeit(func):
+    def wrapper(*args, **kwargs):
+        start = time()
+        func(*args, **kwargs)
+        print("time consumed: {:.6f}s".format(time() - start))
+    return wrapper
+
+
+@timeit
+def load():
+    open("./data/database.db", "w").close()
+
+    connect = sqlite3.connect("./data/database.db")
+    connect.execute("CREATE TABLE 'buyer' ('buyer_id' TEXT, 'contact_phone' TEXT, 'buyer_name' TEXT,"
+                    "'address' TEXT, PRIMARY KEY ('buyer_id'))")
+    connect.execute("CREATE TABLE 'good' ('good_id' TEXT, 'saler_id' TEXT, 'good_name' TEXT,"
+                    "'description' TEXT, 'price' REAL, PRIMARY KEY ('good_id'))")
+    connect.execute("CREATE TABLE 'order' ('order_id' TEXT, 'create_time' TEXT, 'buyer_id' TEXT,"
+                    "'good_id' TEXT, 'remark' TEXT, 'amount' INTEGER, 'done' TEXT,"
+                    "PRIMARY KEY ('order_id', 'buyer_id', 'good_id'))")
+
+    for filename in listdir("./data/"):
+        if filename.startswith("buyer"):
+            infile = open("./data/" + filename, "r", encoding="utf-8")
+            for line in infile:
+                buyer_id, contact_phone, address, buyer_name =\
+                    [data[data.index(":") + 1:] for data in line.split("\t")[:4]]
+                connect.execute("INSERT INTO 'buyer' ('buyer_id', 'contact_phone', 'buyer_name', 'address') VALUES "
+                                "(?, ?, ?, ?)", (buyer_id, contact_phone, buyer_name, address))
+        elif filename.startswith("good"):
+            infile = open("./data/" + filename, "r", encoding="utf-8")
+            for line in infile:
+                good_id, saler_id, good_name, description, price = \
+                    [data[data.index(":") + 1:] for data in line.split("\t")[:5]]
+                connect.execute("INSERT INTO 'good' ('good_id', 'saler_id', 'good_name', 'description', 'price') VALUES"
+                                "(?,?,?,?,?)", (good_id, saler_id, good_name, description, price))
+        elif filename.startswith("order"):
+            infile = open("./data/" + filename, "r", encoding="utf-8")
+            for line in infile:
+                if "remark" in line:
+                    order_id, create_time, buyer_id, good_id, remark, amount, done = \
+                        [data[data.index(":") + 1:] for data in line.split("\t")[:7]]
+                else:
+                    order_id, create_time, buyer_id, good_id, amount, done = \
+                        [data[data.index(":") + 1:] for data in line.split("\t")[:6]]
+                    remark = ""
+
+                connect.execute("INSERT INTO 'order' ('order_id', 'create_time', 'buyer_id', 'good_id', 'remark', 'amount', 'done') "
+                                    "VALUES (?,?,?,?,?,?,?)", (order_id, create_time, buyer_id, good_id, remark, amount, done))
+    connect.commit()
+
+
+@timeit
+def info():
+    connect = sqlite3.connect("./data/database.db")
+    cursor = connect.cursor()
+    cursor.execute("SELECT COUNT(1) FROM 'order'")
+    result = cursor.fetchone()
+    print(result[0])
+
+
+@timeit
+def query_order(order_id):
+    result_format = ("order id: {}\n"
+                     "buyer name: {}\n"
+                     "good name: {}\n"
+                     "amount: {}\n"
+                     "price: {}\n"
+                     "amount * price: {}")
+
+    connect = sqlite3.connect("./data/database.db")
+    cursor = connect.cursor()
+
+    cursor.execute("SELECT buyer_id, good_id, amount FROM 'order' WHERE order_id = ?", (order_id,))
+    result = cursor.fetchone()
+    if not result:
+        print("Order ID {} Not Found".format(order_id))
+        return
+    buyer_id, good_id, amount = result
+
+    cursor.execute("SELECT good_name, price FROM good WHERE good_id = ?", (good_id,))
+    result = cursor.fetchone()
+    if not result:
+        print("Good ID {} Not Found".format(good_id))
+        return
+    good_name, price = result
+
+    cursor.execute("SELECT buyer_name FROM buyer WHERE buyer_id = ?", (buyer_id,))
+    result = cursor.fetchone()
+    if not result:
+        print("Buyer ID {} Not Found".format(buyer_id))
+        return
+    buyer_name = result[0]
+
+    print(result_format.format(order_id, buyer_name, good_name, amount, price, amount * price))
+
+
+@timeit
+def query_buyer(buyer_id):
+    result_format = ("buyer id: {}\n"
+                     "buyer name: {}\n"
+                     "the total number of orders: {}\n"
+                     "the total amount of payments: {}")
+
+    connect = sqlite3.connect("./data/database.db")
+    cursor = connect.cursor()
+
+    cursor.execute("SELECT buyer_name FROM buyer WHERE buyer_id = ?", (buyer_id,))
+    result = cursor.fetchone()
+    if not result:
+        print("Buyer Id {} Not Found".format(buyer_id))
+        return
+
+    buyer_name = result[0]
+
+    cursor.execute("SELECT good_id, amount, done FROM 'order' WHERE buyer_id = ?", (buyer_id,))
+    results = cursor.fetchall()
+    payments = 0
+    for result_buyer in results:
+        good_id, amount, done = result_buyer
+
+        if done == "true":
+            cursor.execute("SELECT price FROM good WHERE good_id = ?", (good_id,))
+            result_good = cursor.fetchone()
+            if not result_good:
+                print("Good ID {} Not Found".format(good_id))
+                return
+            price = result_good[0]
+
+            payments += amount * price
+
+    order_num = len(results)
+
+    print(result_format.format(buyer_id, buyer_name, order_num, payments))
+
+
+@timeit
+def query_good(good_id):
+    result_format = ("good id: {}\n"
+                     "good name: {}\n"
+                     "the total number of orders: {}\n"
+                     "the total number of saled orders: {}")
+
+    connect = sqlite3.connect("./data/database.db")
+    cursor = connect.cursor()
+
+    cursor.execute("SELECT good_name FROM good WHERE good_id = ?", (good_id,))
+    result = cursor.fetchone()
+    if not result:
+        print("Good ID {} Not Found".format(good_id))
+        return
+    good_name = result[0]
+
+    cursor.execute("SELECT done FROM 'order' WHERE good_id = ?", (good_id,))
+    results = cursor.fetchall()
+    order_num = len(results)
+    saled_order_num = len([result for result in results if result[0] == "true"])
+
+    print(result_format.format(good_id, good_name, order_num, saled_order_num))
+
+
+def main():
+    helper = ("query load                load data\n"
+              "      info                show number of orders\n"
+              "      orderid <orderid>   query by order ID\n"
+              "      buyerid <buyerid>   query by buyer ID\n"
+              "      goodid <goodid>     query by good ID\n"
+              "      help                show this help message")
+
+    if len(argv) == 2:
+        if argv[1] == "load":
+            load()
+        elif argv[1] == "info":
+            info()
+        else:
+            print(helper)
+    elif len(argv) == 3:
+        if argv[1] == "orderid":
+            query_order(argv[2])
+        elif argv[1] == "buyerid":
+            query_buyer(argv[2])
+        elif argv[1] == "goodid":
+            query_good(argv[2])
+        else:
+            print(helper)
+    else:
+        print(helper)
+
+
+if __name__ == '__main__':
+    main()

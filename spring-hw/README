@@ -1,5 +1,5 @@
 # Spring Homework
-使用 Python 3 在此目录运行query文件即可，请自行修改'#!'地址与文件权限。
+使用 Python 3，在此目录运行query文件即可，请自行修改'#!'地址与文件权限。
 ## query load
 从'/data/'读取数据文件，存入 sqlite 数据库文件。
 ## query info
